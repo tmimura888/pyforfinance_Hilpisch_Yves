@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Jun 28 01:03:35 2020
+
+@author: mimuratakuma
+"""
+
+# Bayesian Regression
+%matplotlib inline
+from types import ModuleType
+import numpy as np
+import pandas as pd
+import datetime as dt
+from pylab import mpl, plt
+import random
+import matplotlib.pyplot as plt
+import time
+import statsmodels.api as sm
+import scipy.stats as stats
+import seaborn as sns
+import theano.tensor as tt
+import arviz as az
+from matplotlib import dates
+from matplotlib.patches import Rectangle # colorbarの解剖図に使う
+from matplotlib.ticker import LogLocator, MultipleLocator, FixedLocator
+from matplotlib.ticker import LogFormatterSciNotation, FuncFormatter, NullFormatter
+from matplotlib.colors import LogNorm # imshowとcolorbarをlogスケールにする
+from mpl_toolkits.axes_grid1 import make_axes_locatable, ImageGrid # colorbarをうまく配置する
+from pprint import pprint # オブジェクトの入ったlistを表示する際に要素ごとに改行されて見やすくなる
+
+
+plt.style.use('seaborn')
+mpl.rcParams['font.family'] = 'serif'
+np.random.seed(1000)
+
+
+x = np.linspace(1, 10, 500)
+y = 4 + 2 * x + np.random.standard_normal(len(x))*2
+
+reg = np.polyfit(x, y, 1)
+
+reg
+
+#array([2.03760179, 3.73889055])
+
+plt.figure(figsize=(10, 6))
+plt.scatter(x, y, c=y, marker='v', cmap='coolwarm')
+plt.plot(x, reg[1] + reg[0] * x, lw=2.0)
+plt.colorbar()
+plt.xlabel('x')
+plt.ylabel('y')
+
+
+
+
+#MCMC Sampling 
+import pymc3 as pm
+
+%time
+with pm.Model() as model:
+    #model 
+    #Priors for unknon model parameters 
+    alpha = pm.Normal('alpha', mu=0, sd=20)
+    beta = pm.Normal('beta', mu=0, sd=10)
+    sigma = pm.Uniform('sigma', lower=0, upper=10)
+    #Expected value of outcome 
+    y_est = alpha + beta * x
+    likelihood = pm.Normal('y', mu=y_est, sd=sigma, observed=y)
+    
+    #inference 
+    start = pm.find_MAP()
+    step = pm.NUTS()
+    trace = pm.sample(100, tune=1000, start=start, progressbar=True)
+
+
+print(pm.summary(trace))
+#mean     sd  hdi_3%  hdi_97%  ...  ess_sd  ess_bulk  ess_tail  r_hat
+#alpha  3.729  0.196   3.410    4.149  ...    69.0      69.0      54.0   1.02
+#beta   2.039  0.032   1.973    2.094  ...    73.0      71.0      70.0   1.03
+#sigma  1.998  0.071   1.878    2.138  ...    66.0      72.0      98.0   1.04
+
+print(trace[0])
+
+#'alpha': 3.8048151971383484, 
+#'beta': 2.025840924019188, 
+#'sigma_interval__': -1.391374728794765, 
+#'sigma': 1.991883799162194
+
+
+pm.traceplot(trace, lines={'alpha': 4, 'beta': 2, 'sigma': 2});
+
+plt.figure(figsize=(10, 6))
+plt.scatter(x, y, c=y, marker='v', cmap='coolwarm')
+plt.colorbar()
+plt.xlabel('x')    
+plt.ylabel('y')    
+for i in range(len(trace)):
+    plt.plot(x, trace['alpha'][i]+trace['beta'][i]*x)
+ 
+    
+ 
+    
+
+#Comparing Two Financial Instruments
+raw = pd.read_csv('https://hilpisch.com/tr_eikon_eod_data.csv',
+                  index_col=0, parse_dates=True)
+data = raw[['GDX', 'GLD']].dropna()
+data = data / data.iloc[0]
+data.info()
+#<class 'pandas.core.frame.DataFrame'>
+#DatetimeIndex: 2138 entries, 2010-01-04 to 2018-06-29
+#Data columns (total 2 columns):
+ #   Column  Non-Null Count  Dtype  
+#---  ------  --------------  -----  
+# 0   GDX     2138 non-null   float64
+# 1   GLD     2138 non-null   float64
+#dtypes: float64(2)
+#memory usage: 50.1 KB
+
+print(data.iloc[-1] / data.iloc[0] - 1)
+print(data.corr())
+#dtypes: float64(2)
+#memory usage: 50.1 KB
+#GDX   -0.532383
+#GLD    0.080601
+
+#dtype: float64
+#         GDX      GLD
+#GDX  1.00000  0.71539
+#GLD  0.71539  1.00000
+
+data.plot(figsize=(10, 6)); 
+
+
+print(data.index[:3])
+
+
+mpl_dates = mpl.dates.date2num(data.index.to_pydatetime())
+print(mpl_dates[:3])
+#[733776. 733777. 733778.]
+
+
+from datetime import datetime
+from matplotlib.dates import DateFormatter, YearLocator, MonthLocator, DayLocator
+
+#scatter plot of GLD prices against GDX prices
+plt.figure(figsize=(10, 6))
+plt.scatter(data['GDX'], data['GLD'], c=mpl_dates,
+            marker='o', cmap='coolwarm')
+plt.xlabel('GDX')
+plt.ylabel('GLD')
+plt.colorbar(ticks=mpl.dates.DayLocator(interval=250),format=mpl.dates.DateFormatter('%d %b %y'));
+
+
+
+
+
+%time
+with pm.Model() as model:
+    alpha = pm.Normal('alpha', mu=0, sd=20)
+    beta = pm.Normal('beta', mu=0, sd=20)
+    sigma = pm.Uniform('sigma', lower=0, upper=50)
+    y_est = alpha + beta * data['GDX'].values
+    likelihood = pm.Normal('GLD', mu=y_est, sd=sigma, observed=data['GLD'].values)
+    
+    
+    start = pm.find_MAP()
+    step = pm.NUTS()
+    trace = pm.sample(250, tune=3000, start=start, progressbar=True)
+    
+    
+print(pm.summary(trace))
+#   mean     sd  hdi_3%  hdi_97%  ...  ess_sd  ess_bulk  ess_tail  r_hat
+#alpha  0.914  0.006   0.903    0.926  ...   200.0     200.0     170.0   1.01
+#beta   0.385  0.008   0.371    0.398  ...   216.0     215.0     215.0   1.02
+#sigma  0.120  0.002   0.116    0.123  ...   269.0     277.0     214.0   1.01
+
+    
+
+
+fig = pm.traceplot(trace)
+
+
+plt.figure(figsize=(10, 6))
+plt.scatter(data['GDX'], data['GLD'], c=mpl_dates,
+            marker='o', cmap='coolwarm')
+plt.xlabel('GDX')
+plt.ylabel('GLD')
+for i in range(len(trace)):
+    plt.plot(data['GDX'],
+             trace['alpha'][i] + trace['beta'][i]*data['GDX'])
+plt.colorbar(ticks=mlp.dates.DayLocator(interval=250),
+             format=mpl.dates.DateFormatter('%d %b %y'));
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
+    
+    
+    
+    
+    
